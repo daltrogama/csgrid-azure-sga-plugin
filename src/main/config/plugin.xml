@@ -1,0 +1,14 @@
+<?xml version="1.0" ?>
+<!DOCTYPE plugin PUBLIC "-//JPF//Java Plug-in Manifest 1.0" "http://jpf.sourceforge.net/plugin_1_0.dtd">
+<plugin id="csbase.sga.fogbow" version="1.0.0">
+    <requires>
+        <import plugin-id="csbase.sga"/>
+    </requires>
+    <runtime>
+        <library id="sga" path="/" type="code"/>
+    </runtime>
+    <extension plugin-id="csbase.sga" point-id="connector" id="sga-connectors">
+        <parameter id="class" value="csbase.fogbow.SGAFogbow"/>
+        <parameter id="name" value="fogbow"/>
+    </extension>
+</plugin>
