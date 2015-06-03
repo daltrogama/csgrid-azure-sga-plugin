@@ -1,4 +1,4 @@
-package csbase.fogbow;
+package csbase.azure;
 
 import java.io.IOException;
 import java.util.Map;

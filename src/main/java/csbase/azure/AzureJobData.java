@@ -1,21 +1,19 @@
-package csbase.fogbow;
+package csbase.azure;
 
 import java.util.Map;
 
 import csbase.sga.executor.JobData;
 
-public class FogbowJobData implements JobData {
+public class AzureJobData implements JobData {
 
-	/**
-	 * 
-	 */
 	private static final long serialVersionUID = 1L;
 	
 	private String requestId;
 	private String instanceId;
+	
 	private Map<String, String> extraParams;
 
-	public FogbowJobData(String requestId, String instanceId,
+	public AzureJobData(String requestId, String instanceId,
 			Map<String, String> extraParams) {
 		this.requestId = requestId;
 		this.instanceId = instanceId;
@@ -46,4 +44,5 @@ public class FogbowJobData implements JobData {
 		this.extraParams = extraParams;
 	}
 
+	
 }

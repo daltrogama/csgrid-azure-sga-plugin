@@ -1,6 +1,6 @@
 #!/bin/bash
-JAR_WITH_DEPENDENCIES=fogbow-sga-0.0.1-SNAPSHOT-jar-with-dependencies.jar
-ZIP_WITH_DEPENDENCIES=fogbow-sga-0.0.1-SNAPSHOT-jpf.zip
+JAR_WITH_DEPENDENCIES=azure-sga-0.0.1-SNAPSHOT-jar-with-dependencies.jar
+ZIP_WITH_DEPENDENCIES=azure-sga-0.0.1-SNAPSHOT-jpf.zip
 
 mvn clean install
 cd target
@@ -14,3 +14,5 @@ zip -r $ZIP_WITH_DEPENDENCIES *
 cd ..
 mv sandbox/$ZIP_WITH_DEPENDENCIES .
 rm -rf sandbox
+
+cp target/azure-sga-0.0.1-SNAPSHOT-jpf.zip ../csgrid-trunk/_plugin

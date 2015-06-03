@@ -1,8 +1,8 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
-	<groupId>fogbow-sga</groupId>
-	<artifactId>fogbow-sga</artifactId>
+	<groupId>azure-sga</groupId>
+	<artifactId>azure-sga</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<build>
 		<plugins>
@@ -114,11 +114,6 @@
 			<artifactId>csbase-sga-local</artifactId>
 			<version>0.0.1-SNAPSHOT</version>
 		</dependency>
-<!-- 		<dependency> -->
-<!-- 			<groupId>fogbow4j</groupId> -->
-<!-- 			<artifactId>fogbow4j</artifactId> -->
-<!-- 			<version>0.0.1-SNAPSHOT</version> -->
-<!-- 		</dependency> -->
 		<dependency>
 			<groupId>net.schmizz</groupId>
 			<artifactId>sshj</artifactId>
@@ -143,6 +138,16 @@
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-lang3</artifactId>
 			<version>3.4</version>
+		</dependency>
+		<dependency>
+		  <groupId>com.microsoft.azure</groupId>
+		  <artifactId>azure-storage</artifactId>
+		  <version>2.2.0</version>
+		</dependency>
+		<dependency>
+		  <groupId>com.microsoft.azure</groupId>
+		  <artifactId>azure-management-compute</artifactId>
+		  <version>0.7.0</version>
 		</dependency>
 	</dependencies>
 </project>
