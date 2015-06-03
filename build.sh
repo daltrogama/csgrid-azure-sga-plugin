@@ -2,7 +2,7 @@
 JAR_WITH_DEPENDENCIES=azure-sga-0.0.1-SNAPSHOT-jar-with-dependencies.jar
 ZIP_WITH_DEPENDENCIES=azure-sga-0.0.1-SNAPSHOT-jpf.zip
 
-mvn clean install
+mvn -o clean install
 cd target
 mkdir sandbox
 cp $JAR_WITH_DEPENDENCIES sandbox

@@ -1,11 +1,26 @@
 package csbase.azure;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.logging.Logger;
+
+import javax.xml.parsers.ParserConfigurationException;
+
+import org.xml.sax.SAXException;
+
+import com.microsoft.windowsazure.Configuration;
+import com.microsoft.windowsazure.exception.ServiceException;
+import com.microsoft.windowsazure.management.compute.ComputeManagementClient;
+import com.microsoft.windowsazure.management.compute.ComputeManagementService;
+import com.microsoft.windowsazure.management.compute.models.HostedServiceCreateParameters;
+import com.microsoft.windowsazure.management.compute.models.HostedServiceListResponse.HostedService;
+import com.microsoft.windowsazure.management.configuration.ManagementConfiguration;
 
 import sgaidl.ActionNotSupportedException;
 import sgaidl.COMMAND_STATE;
@@ -29,7 +44,7 @@ public class AzureExecutor implements JobExecutor {
 	
 	public AzureExecutor(Properties pluginProperties) {
 		System.out.println("AzureExecutor() : " + pluginProperties);
-		this.pluginProperties = pluginProperties;
+
 	}
 	
 	@Override
