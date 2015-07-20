@@ -15,4 +15,6 @@ cd ..
 mv sandbox/$ZIP_WITH_DEPENDENCIES .
 rm -rf sandbox
 
+cd ..
+
 cp target/azure-sga-0.0.1-SNAPSHOT-jpf.zip ../csgrid-trunk/_plugin
