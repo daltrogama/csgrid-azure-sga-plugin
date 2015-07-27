@@ -11,7 +11,7 @@ import csbase.server.plugin.service.sgaservice.SGADataTransferException;
 
 public class AzureCopy implements ISGADataTransfer {
 
-  private AzureConnector azure;
+  private AzureConnector azure = AzureConnector.getInstance();
 	
   /**
    * As propriedades que o SGA forneceu sobre o mecanismo a ser adotado.
@@ -40,7 +40,7 @@ public class AzureCopy implements ISGADataTransfer {
     this.sgaProperties = sgaProperties;
     System.out.println("AzureCopy.setSGAProperties("+this.sgaProperties.toString()+")");
     
-    azure = new AzureConnector(sgaProperties);
+    azure.configure(sgaProperties);
     
   }
 

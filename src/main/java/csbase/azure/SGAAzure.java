@@ -2,8 +2,6 @@ package csbase.azure;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Hashtable;
-import java.util.Map;
 import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -47,7 +45,7 @@ public class SGAAzure implements ISGADaemon {
 	protected Logger logger = Logger.getLogger(this.getClass().getName());
 	private static final Level DEFAULT_LOG_LEVEL = Level.INFO;
 
-	private AzureConnector azure;
+	private AzureConnector azure = AzureConnector.getInstance();
 	
 	private ExecutionPool executor;
 	
@@ -97,20 +95,20 @@ public class SGAAzure implements ISGADaemon {
 		// Propriedades dos nós
 
 		// Coloca no log as propriedades dos SGAs
-		logger.finest("Propriedades do SGA: ");
-		for (Pair p : sgaProperties.properties) {
-			logger.finest("  " + p.key + "=" + p.value);
-		}
-		logger.finest("  " + "Propriedades dos nós do SGA ("
-				+ sgaProperties.nodesProperties.length + ")");
-
-		int j = 0;
-		for (Pair[] nodes : sgaProperties.nodesProperties) {
-			logger.finest("  " + "Nó " + (j++));
-			for (Pair p : nodes) {
-				logger.finest("     " + p.key + "=" + p.value);
-			}
-		}
+//		logger.finest("Propriedades do SGA: ");
+//		for (Pair p : sgaProperties.properties) {
+//			logger.finest("  " + p.key + "=" + p.value);
+//		}
+//		logger.finest("  " + "Propriedades dos nós do SGA ("
+//				+ sgaProperties.nodesProperties.length + ")");
+//
+//		int j = 0;
+//		for (Pair[] nodes : sgaProperties.nodesProperties) {
+//			logger.finest("  " + "Nó " + (j++));
+//			for (Pair p : nodes) {
+//				logger.finest("     " + p.key + "=" + p.value);
+//			}
+//		}
 		return sgaProperties;
 	}
 
@@ -123,7 +121,7 @@ public class SGAAzure implements ISGADaemon {
 		// Valida as propriedades do plugin
 		//validatePluginProperties();
 		
-		azure = new AzureConnector(pluginProperties);
+		azure.configure(pluginProperties);
 		
 		executor = new ExecutionPool(pluginProperties, azure);
 		
@@ -248,30 +246,29 @@ public class SGAAzure implements ISGADaemon {
 
 	protected void initTestDemo() {
 		
-		try {
-			azure.refreshAllVMs();
-			azure.createNewVirtualMachine("Standard_D1");
-			System.out.println(azure.getAllVMs().toString());
-			
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		} catch (Exception e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-		
-		//		// Get current context class loader
-		//		ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
-		//		System.out.println("Classloader: "+contextLoader);
-		//		// Change context classloader to class context loader   
-		//		Thread.currentThread().setContextClassLoader(ComputeManagementService.class.getClassLoader()); 
-		//
-		//		setExecutor(new AzureExecutor(pluginProperties));
-		//		setMonitor(new AzureMonitor());
-
-		//TODO: Remover esta terminação forçada.
-		System.out.println("Terminando provisoriamente, para testes.");
-		Runtime.getRuntime().exit(0);
+//		try {
+//			azure.refreshAllVMs();
+//			System.out.println(azure.getAllVMs().toString());
+//			System.out.println("Máquina virtual criada: "+azure.createNewVirtualMachine("Small"));
+//		} catch (InterruptedException e) {
+//			e.printStackTrace();
+//		} catch (Exception e) {
+//			// TODO Auto-generated catch block
+//			e.printStackTrace();
+//		}
+//		
+//		//		// Get current context class loader
+//		//		ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+//		//		System.out.println("Classloader: "+contextLoader);
+//		//		// Change context classloader to class context loader   
+//		//		Thread.currentThread().setContextClassLoader(ComputeManagementService.class.getClassLoader()); 
+//		//
+//		//		setExecutor(new AzureExecutor(pluginProperties));
+//		//		setMonitor(new AzureMonitor());
+//
+//		//TODO: Remover esta terminação forçada.
+//		System.out.println("Terminando provisoriamente, para testes.");
+//		Runtime.getRuntime().exit(0);
 
 	}
 
@@ -285,7 +282,7 @@ public class SGAAzure implements ISGADaemon {
 		 */
 		@Override
 		public void run() {
-			logger.finest("Renova o SGA " + sgaName);
+			//logger.finest("Renova o SGA " + sgaName);
 			try {
 				sgaService.isRegistered(SGAAzure.this, sgaName);
 			}
@@ -310,7 +307,7 @@ public class SGAAzure implements ISGADaemon {
 		 */
 		@Override
 		public void run() {
-			logger.finest("Atualiza os dados do SGA  " + sgaName);
+			//logger.finest("Atualiza os dados do SGA  " + sgaName);
 			SGAProperties sgaProps;
 			//TODO monitor.update()
 			sgaProps = loadSGAProperties();
@@ -393,14 +390,21 @@ public class SGAAzure implements ISGADaemon {
 
 	@Override
 	public SGAPath getPath(String path) throws InvalidPathException, PathNotFoundException {
-		// TODO Auto-generated method stub
-		return null;
+		
+		System.out.println("SGAAzure.getPath("+path+")");
+		
+		return new SGAPath(path, 0, false, false, "", true, true, false, true);
 	}
 
 	@Override
 	public SGAPath[] getPaths(String root) throws InvalidPathException, PathNotFoundException {
-		// TODO Auto-generated method stub
-		return null;
+		
+		System.out.println("SGAAzure.getPaths("+root+")");
+		
+		return new SGAPath[]{
+				new SGAPath(root+"/1", 0, false, false, "", true, true, false, true),
+				new SGAPath(root+"/2", 0, false, false, "", true, true, false, true)
+		};
 	}
 
 }

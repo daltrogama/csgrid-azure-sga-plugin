@@ -3,12 +3,18 @@
 <plugin id="csbase.sga.azure" version="1.0.0">
     <requires>
         <import plugin-id="csbase.sga"/>
+        <import plugin-id="csbase.sga.datatransfer"/>        
     </requires>
     <runtime>
         <library id="sga" path="/" type="code"/>
+        <library id="sga-transfer" path="/" type="code"/>
     </runtime>
     <extension plugin-id="csbase.sga" point-id="connector" id="sga-connectors">
         <parameter id="class" value="csbase.azure.SGAAzure"/>
         <parameter id="name" value="azure"/>
+    </extension>
+    <extension plugin-id="csbase.sga.datatransfer" point-id="mechanism" id="copy-files">
+        <parameter id="class" value="csbase.azure.AzureCopy"/>
+        <parameter id="name" value="azure-copy-mechanism"/>
     </extension>
 </plugin>
