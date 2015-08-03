@@ -1,11 +1,29 @@
 package csbase.azure;
 
+import java.io.File;
+import java.io.IOException;
+import java.net.URISyntaxException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Scanner;
+import java.util.regex.Pattern;
+
+import com.microsoft.azure.storage.StorageException;
 
 import csbase.server.plugin.service.IServiceManager;
+import csbase.server.plugin.service.algorithmservice.IAlgorithmService;
+import csbase.server.plugin.service.projectservice.IProjectService;
 import csbase.server.plugin.service.sgaservice.ISGADataTransfer;
 import csbase.server.plugin.service.sgaservice.SGADataTransferException;
 
@@ -53,7 +71,23 @@ public class AzureCopy implements ISGADataTransfer {
 	  System.out.println("AzureCopy.copyTo()");
 	  System.out.println("* SourcePath: "+Arrays.toString(sourcePath));
 	  System.out.println("* TargetPath: "+Arrays.toString(targetPath));
-  
+	  
+	    String root = sgaProperties.getProperty(ROOT);
+	    Path source = Paths.get(join(sourcePath, File.separator));
+	    Path target = Paths.get(root + File.separator + join(targetPath, File.separator));
+
+	    try {
+	      if (!Files.isDirectory(source)) {
+	        azure.copy(source, target);
+	      }
+	      if (Files.isDirectory(source)) {
+	        Files.walkFileTree(source, new CopyFileVisitor(source, target));
+	      }
+	    }
+	    catch (IOException | URISyntaxException | StorageException e) {
+	      throw new SGADataTransferException(e);
+	    }
+
   }
 
   /**
@@ -65,7 +99,25 @@ public class AzureCopy implements ISGADataTransfer {
 	  System.out.println("AzureCopy.copyFrom()");
 	  System.out.println("* remoteFilePath: "+Arrays.toString(remoteFilePath));
 	  System.out.println("* localFilePath: "+Arrays.toString(localFilePath));
-  
+
+	    String root = sgaProperties.getProperty(ROOT);
+	    Path remote =
+	      Paths.get(root + File.separator + join(remoteFilePath, File.separator));
+	    Path local = Paths.get(join(localFilePath, File.separator));
+
+	    try {
+	      if (!Files.isDirectory(local)) {
+	        Path parent = local.getParent();
+	        Files.createDirectories(parent);
+	        azure.copy(remote, local);
+	        return;
+	      }
+	      Files.walkFileTree(remote, new CopyFileVisitor(remote, local));
+	    }
+	    catch (IOException | URISyntaxException | StorageException e) {
+	      throw new SGADataTransferException(e);
+	    }
+	  
   }
 
   /**
@@ -76,6 +128,16 @@ public class AzureCopy implements ISGADataTransfer {
 	  
 	  System.out.println("AzureCopy.createDirectory()");
 	  System.out.println("* path: "+Arrays.toString(path));
+	  
+	    String root = sgaProperties.getProperty(ROOT);
+	    Path target = Paths.get(root + File.separator + join(path, File.separator));
+
+	    try {
+	      azure.createDirectories(target);
+	    }
+	    catch (Throwable e) {
+	      throw new SGADataTransferException(e);
+	    }
   
   }
 
@@ -87,7 +149,14 @@ public class AzureCopy implements ISGADataTransfer {
 
 	  System.out.println("AzureCopy.remove()");
 	  System.out.println("* path: "+Arrays.toString(path));
-	  
+	    String root = sgaProperties.getProperty(ROOT);
+	    Path target = Paths.get(root + File.separator + join(path, File.separator));
+	    try {
+			azure.deleteBlobs(target);
+		} catch (URISyntaxException | StorageException e) {
+			throw new SGADataTransferException(e);
+		}
+
   }
 
   /**
@@ -98,7 +167,17 @@ public class AzureCopy implements ISGADataTransfer {
 
 	  System.out.println("AzureCopy.checkExistence() == true");
 	  System.out.println("* path: "+Arrays.toString(path));
-	  return true;
+	  
+	    String root = sgaProperties.getProperty(ROOT);
+	    Path target = Paths.get(root + File.separator + join(path, File.separator));
+	    boolean exists;
+		try {
+			exists = azure.exists(target);
+		} catch (StorageException | URISyntaxException e) {
+			throw new SGADataTransferException(e);
+		}
+
+	    return exists;
 	  
   }
 
@@ -107,8 +186,9 @@ public class AzureCopy implements ISGADataTransfer {
    */
   @Override
   public String[] getProjectsRootPath() throws SGADataTransferException {
-	System.out.println("AzureCopy.getProjectsRootPath() == azure/dummy/projects");
-    return new String[] { "azure", "dummy", "projects" };
+    IProjectService projectService =
+      (IProjectService) serviceManager.getService("ProjectService");
+    return new String[] { projectService.getProjectRepositoryPath() };
   }
 
   /**
@@ -116,8 +196,9 @@ public class AzureCopy implements ISGADataTransfer {
    */
   @Override
   public String[] getAlgorithmsRootPath() throws SGADataTransferException {
-		System.out.println("AzureCopy.getAlgorithmsRootPath() == azure/dummy/algorithms");
-	    return new String[] { "azure", "dummy", "algorithms" };
+    IAlgorithmService algorithmService =
+      (IAlgorithmService) serviceManager.getService("AlgorithmService");
+    return new String[] { algorithmService.getAlgorithmRepositoryPath() };
   }
 
   /**
@@ -125,19 +206,33 @@ public class AzureCopy implements ISGADataTransfer {
    */
   @Override
   public Map<String[], Long> getLocalTimestamps(String[] sandboxPath) throws SGADataTransferException {
-    final Map<String[], Long> timestampsMap = new HashMap<>();
-    
-    timestampsMap.put(new String[]{"arq1"}, 100000l);
-    timestampsMap.put(new String[]{"arq2"}, 100001l);
-    timestampsMap.put(new String[]{"arq3"}, 100002l);
-    timestampsMap.put(new String[]{"pasta1", "arq1"}, 101003l);
-    timestampsMap.put(new String[]{"pasta1", "arq2"}, 102003l);
-    timestampsMap.put(new String[]{"pasta1", "arq3"}, 103003l);
-    
+ 
 	System.out.println("AzureCopy.getLocalTimestamps()");
 	System.out.println("* path: "+Arrays.toString(sandboxPath));
-    System.out.println("* res: "+timestampsMap);
-    
+	
+    final Map<String[], Long> timestampsMap = new HashMap<>();
+    Path sandbox = Paths.get(join(sandboxPath, File.separator));
+
+    try {
+      Files.walkFileTree(sandbox, new SimpleFileVisitor<Path>() {
+        @Override
+        public FileVisitResult visitFile(Path path, BasicFileAttributes attrs)
+          throws IOException {
+          File file = path.toFile();
+          if (!file.isDirectory()) {
+            timestampsMap.put(splitPath(file.getAbsolutePath(),
+              File.separatorChar), file.lastModified());
+          }
+
+          return FileVisitResult.CONTINUE;
+        }
+
+      });
+    }
+    catch (IOException e) {
+      throw new SGADataTransferException(e);
+    }
+
     return timestampsMap;
   }
 
@@ -146,21 +241,129 @@ public class AzureCopy implements ISGADataTransfer {
    */
   @Override
   public Map<String[], Long> getRemoteTimestamps(String[] sandboxPath) throws SGADataTransferException {
-    final Map<String[], Long> timestampsMap = new HashMap<>();
     
-    timestampsMap.put(new String[]{"arq1"}, 100000l);
-    timestampsMap.put(new String[]{"arq2"}, 100101l); // Atualizado
-    timestampsMap.put(new String[]{"arq3"}, 100002l);
-    timestampsMap.put(new String[]{"arq4"}, 100003l); // Novo
-    timestampsMap.put(new String[]{"pasta1", "arq1"}, 101003l);
-    timestampsMap.put(new String[]{"pasta1", "arq2"}, 102003l);
-    timestampsMap.put(new String[]{"pasta1", "arq3"}, 103023l); // Atualizado
-    
-	System.out.println("AzureCopy.getLocalTimestamps()");
+	System.out.println("AzureCopy.getRemoteTimestamps()");
 	System.out.println("* path: "+Arrays.toString(sandboxPath));
+	
+    final Map<String[], Long> timestampsMap = new HashMap<>();
+    Path sandbox =
+      Paths.get(sgaProperties.getProperty(ROOT) + File.separator
+        + join(sandboxPath, File.separator));
+
+    try {
+    	timestampsMap.putAll(azure.getTimestamps(sandbox));
+    }
+    catch (URISyntaxException | StorageException e) {
+      throw new SGADataTransferException(e);
+    }
+
     System.out.println("* res: "+timestampsMap);
     
     return timestampsMap;
   }
+  
+  /**
+   * Constroi uma string concatenando o array de strings usando o separador
+   * informado.
+   *
+   * @param str o array de strings a serem concatenadas
+   * @param separator o separador usado para concatenação
+   * @return a string resultante da concatenação
+   */
+  private String join(String[] str, String separator) {
+    String retval = "";
+    for (String s : str) {
+      retval += separator + s;
+    }
+    return retval.replaceFirst(separator, "");
+  }
+
+  /**
+   * Separa um caminho.
+   *
+   * @param path o camimnho
+   * @param separator o separador
+   *
+   * @return array contendo cada item do caminho
+   */
+  public static final String[] splitPath(String path, char separator) {
+    @SuppressWarnings("resource")
+	Scanner scanner =
+      new Scanner(path).useDelimiter(Pattern.quote(String.valueOf(separator)));
+    List<String> pathAsList = new ArrayList<String>();
+    while (scanner.hasNext()) {
+      String dir = scanner.next();
+      /*
+       * FIXME o 'if' abaixo existe apenas para compatibilizar o comportamento
+       * com a implementação anterior (que não usava o Scanner). Ele faz com que
+       * paths vazios ("//") sejam ignorados, quando na talvez devessem retornar
+       * "" (que é o comportamento natural do Scanner para este caso).
+       */
+      if (!dir.isEmpty()) {
+        pathAsList.add(dir);
+      }
+    }
+    return pathAsList.toArray(new String[pathAsList.size()]);
+  }
+
+  /**
+   * Implementa um visitador sobre arquivos para fazer uma cópia.
+   *
+   * @author Tecgraf/PUC-Rio
+   */
+  public class CopyFileVisitor extends SimpleFileVisitor<Path> {
+    /** Caminho destino */
+    private final Path targetPath;
+    /** Caminho origem */
+    private final Path sourcePath;
+
+    /**
+     * Construtor.
+     *
+     * @param sourcePath caminho de origem
+     * @param targetPath caminho destino
+     */
+    public CopyFileVisitor(Path sourcePath, Path targetPath) {
+      this.sourcePath = sourcePath;
+      this.targetPath = targetPath;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public FileVisitResult preVisitDirectory(final Path directory,
+      final BasicFileAttributes attrs) throws IOException {
+//      Path targetdir = targetPath.resolve(sourcePath.relativize(directory));
+//      try {
+//        try {
+//			azure.copy(directory, targetdir);
+//		} catch (URISyntaxException | StorageException e) {
+//			throw new IOException(e);
+//		}
+//      }
+//      catch (FileAlreadyExistsException e) {
+//        if (!Files.isDirectory(targetPath)) {
+//          throw e;
+//        }
+//      }
+      return FileVisitResult.CONTINUE;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public FileVisitResult visitFile(final Path file,
+      final BasicFileAttributes attrs) throws IOException {
+      try {
+		azure.copy(file, targetPath.resolve(sourcePath.relativize(file)));
+	} catch (URISyntaxException | StorageException e) {
+		throw new IOException(e);
+	}
+      return FileVisitResult.CONTINUE;
+    }
+  }
+
 
 }

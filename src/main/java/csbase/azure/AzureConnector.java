@@ -3,19 +3,24 @@ package csbase.azure;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.file.Path;
 import java.security.InvalidKeyException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
+import java.util.Scanner;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 import javax.xml.parsers.ParserConfigurationException;
 
@@ -26,8 +31,13 @@ import org.xml.sax.SAXException;
 
 import com.microsoft.azure.storage.CloudStorageAccount;
 import com.microsoft.azure.storage.StorageException;
+import com.microsoft.azure.storage.blob.BlobListingDetails;
+import com.microsoft.azure.storage.blob.BlobRequestOptions;
 import com.microsoft.azure.storage.blob.CloudBlobClient;
 import com.microsoft.azure.storage.blob.CloudBlobContainer;
+import com.microsoft.azure.storage.blob.CloudBlobDirectory;
+import com.microsoft.azure.storage.blob.CloudBlockBlob;
+import com.microsoft.azure.storage.blob.ListBlobItem;
 import com.microsoft.windowsazure.Configuration;
 import com.microsoft.windowsazure.core.OperationResponse;
 import com.microsoft.windowsazure.core.OperationStatusResponse;
@@ -100,6 +110,8 @@ class AzureConnector {
 	private CloudBlobContainer vhdsConteiner;
 	private CloudBlobContainer algorithmsConteiner;
 	private CloudBlobContainer projectsConteiner;
+	
+	private String fakeBlobRootDir = "/AzureBlobStorage";
 	
 	private Map<String, VMInstance> virtualMachines = Collections.synchronizedMap(new HashMap<String, VMInstance>());
 
@@ -622,5 +634,162 @@ class AzureConnector {
 	public Map<String, VMInstance> getAllVMs() {
 		return Collections.unmodifiableMap(virtualMachines);
 	}
+
+	public void copy(Path source, Path target) throws URISyntaxException, StorageException, IOException {
+		boolean sourceIsAzure = source.toFile().getAbsolutePath().startsWith(fakeBlobRootDir);
+		boolean targetIsAzure = target.toFile().getAbsolutePath().startsWith(fakeBlobRootDir);
+		if (!sourceIsAzure && targetIsAzure){
+			CloudBlockBlob targetBlob = unAzureSinglePath(target.toFile().getAbsolutePath());
+			logger.log(Level.FINE, "Copiando arquivo "+source+" para BLOB "+targetBlob.getName());
+			if (!source.toFile().getParentFile().exists())
+				source.toFile().getParentFile().mkdirs();
+			targetBlob.uploadFromFile(source.toFile().getAbsolutePath());
+		}
+		else if (sourceIsAzure && !targetIsAzure){
+			CloudBlockBlob sourceBlob = unAzureSinglePath(source.toFile().getAbsolutePath());
+			logger.log(Level.FINE, "Copiando BLOB "+sourceBlob.getName()+" para arquivo "+target);
+			if (!target.toFile().getParentFile().exists())
+				target.toFile().getParentFile().mkdirs();
+			sourceBlob.downloadToFile(target.toFile().getAbsolutePath());
+		}
+//		else if (!sourceIsAzure && !targetIsAzure){
+//			
+//			sourceBlob.downloadToFile(target.toFile().getAbsolutePath());
+//		}
+		else{
+			throw new IllegalStateException("Só sei copiar de Azure para local ou de local para azure.");
+		}
+	}
+
+	private CloudBlockBlob unAzureSinglePath(String path) throws URISyntaxException, StorageException {
+		if (!path.startsWith(fakeBlobRootDir))
+			throw new IllegalArgumentException("Espera-se que o diretório comece com "+fakeBlobRootDir);
+		String blobName = path.replaceFirst(Pattern.quote(fakeBlobRootDir), "");
+		
+		if (path.startsWith("algorithms"))
+			return algorithmsConteiner.getBlockBlobReference(blobName);
+		else
+			return projectsConteiner.getBlockBlobReference(blobName);
+	}
+
+	public void createDirectories(Path target) {
+		logger.log(Level.FINE, "Criando diretório "+target);
+		boolean isAzure = target.toFile().getAbsolutePath().startsWith(fakeBlobRootDir);
+		if (!isAzure){
+			target.toFile().mkdirs();
+		}
+	}
+
+	public void deleteBlobs(Path target) throws URISyntaxException, StorageException {
+		for (ListBlobItem i : unAzurePrefixTree(target.toFile().getAbsolutePath())){
+			if (i instanceof CloudBlockBlob){
+				CloudBlockBlob blob = (CloudBlockBlob)i;
+				logger.log(Level.FINE, "Excluindo blob "+blob.getName());
+				blob.delete();
+			}
+		}
+	}
+
+	private Iterable<ListBlobItem> unAzurePrefixTree(String path) throws URISyntaxException, StorageException {
+		if (!path.startsWith(fakeBlobRootDir))
+			throw new IllegalArgumentException("Espera-se que o diretório comece com "+fakeBlobRootDir);
+		String blobName = path.replaceFirst(Pattern.quote(fakeBlobRootDir), "");
+		
+		EnumSet<BlobListingDetails> listingDetails = EnumSet.of(BlobListingDetails.METADATA);
+		BlobRequestOptions options = new BlobRequestOptions();
+		
+		if (path.startsWith("algorithms"))
+			return algorithmsConteiner.listBlobs(blobName, true, listingDetails, options, null);
+		else
+			return projectsConteiner.listBlobs(blobName, true, listingDetails, options, null);
+	}
+	
+	public boolean exists(Path target) throws StorageException, URISyntaxException {
+		boolean isAzure = target.toFile().getAbsolutePath().startsWith(fakeBlobRootDir);
+		boolean result;
+		if (isAzure){
+			result = unAzureSinglePath(target.toFile().getAbsolutePath()).exists();
+			// Se não existe como um blob único, tenta ver se existe como diretório
+			if (!result){
+				for (ListBlobItem i : unAzurePrefixTree(target.toFile().getAbsolutePath()+"/")){
+					if (i instanceof CloudBlockBlob){
+						result = true;
+						break;
+					}
+				}
+			}
+		}
+		else
+			result = target.toFile().exists();
+		logger.log(Level.FINE, "Verificando se o arquivo "+target+" existe: "+result);
+		return result;
+	}
+
+	public Map<String[], Long> getTimestamps(Path rootDir) throws URISyntaxException, StorageException {
+		
+		Map<String[], Long> result = new HashMap<>();
+		
+		for (ListBlobItem i : unAzurePrefixTree(rootDir.toFile().getAbsolutePath())){
+			if (i instanceof CloudBlockBlob){
+				CloudBlockBlob blob = (CloudBlockBlob)i;
+				//String blobName = k.getPrefix();
+//				if (blobName.endsWith("/"))
+//					blobName = blobName.substring(0, blobName.length()-1);
+//				if (blobName.startsWith("algorithms"))
+//					blob = algorithmsConteiner.getBlockBlobReference(blobName);
+//				else
+//					blob = projectsConteiner.getBlockBlobReference(blobName);
+				
+				logger.log(Level.FINE, "Recuperando metadados de "+blob.getName()+"...");
+				try{
+					blob.downloadAttributes();
+				}
+				catch(StorageException se){
+					if (se.getMessage().contains("The specified blob does not exist"))
+						continue;
+				}
+				Date blobResult = blob.getProperties().getLastModified();
+				
+				logger.log(Level.FINE, "Data de criação do blob "+blob.getName()+": "+blobResult);
+				long time;
+				if (blobResult == null)
+					time = 0;
+				else
+					time = blobResult.getTime();
+				result.put(splitPath(fakeBlobRootDir+"/"+blob.getName(), '/'), time);
+			}
+		}
+
+		return result;
+	}
+
+	
+	  /**
+	   * Separa um caminho.
+	   *
+	   * @param path o camimnho
+	   * @param separator o separador
+	   *
+	   * @return array contendo cada item do caminho
+	   */
+	  public static final String[] splitPath(String path, char separator) {
+	    @SuppressWarnings("resource")
+		Scanner scanner =
+	      new Scanner(path).useDelimiter(Pattern.quote(String.valueOf(separator)));
+	    List<String> pathAsList = new ArrayList<String>();
+	    while (scanner.hasNext()) {
+	      String dir = scanner.next();
+	      /*
+	       * FIXME o 'if' abaixo existe apenas para compatibilizar o comportamento
+	       * com a implementação anterior (que não usava o Scanner). Ele faz com que
+	       * paths vazios ("//") sejam ignorados, quando na talvez devessem retornar
+	       * "" (que é o comportamento natural do Scanner para este caso).
+	       */
+	      if (!dir.isEmpty()) {
+	        pathAsList.add(dir);
+	      }
+	    }
+	    return pathAsList.toArray(new String[pathAsList.size()]);
+	  }
 
 }
