@@ -29,6 +29,7 @@ import org.apache.commons.lang3.builder.ReflectionToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 import org.xml.sax.SAXException;
 
+import com.microsoft.azure.storage.AccessCondition;
 import com.microsoft.azure.storage.CloudStorageAccount;
 import com.microsoft.azure.storage.StorageException;
 import com.microsoft.azure.storage.blob.BlobListingDetails;
@@ -643,7 +644,12 @@ class AzureConnector {
 			logger.log(Level.FINE, "Copiando arquivo "+source+" para BLOB "+targetBlob.getName());
 			if (!source.toFile().getParentFile().exists())
 				source.toFile().getParentFile().mkdirs();
+			
 			targetBlob.uploadFromFile(source.toFile().getAbsolutePath());
+			HashMap<String, String> metadata = new HashMap<>();
+			metadata.put("originalLastModified", String.valueOf(source.toFile().lastModified()));
+			targetBlob.setMetadata(metadata);
+			targetBlob.uploadMetadata();
 		}
 		else if (sourceIsAzure && !targetIsAzure){
 			CloudBlockBlob sourceBlob = unAzureSinglePath(source.toFile().getAbsolutePath());
@@ -732,14 +738,6 @@ class AzureConnector {
 		for (ListBlobItem i : unAzurePrefixTree(rootDir.toFile().getAbsolutePath())){
 			if (i instanceof CloudBlockBlob){
 				CloudBlockBlob blob = (CloudBlockBlob)i;
-				//String blobName = k.getPrefix();
-//				if (blobName.endsWith("/"))
-//					blobName = blobName.substring(0, blobName.length()-1);
-//				if (blobName.startsWith("algorithms"))
-//					blob = algorithmsConteiner.getBlockBlobReference(blobName);
-//				else
-//					blob = projectsConteiner.getBlockBlobReference(blobName);
-				
 				logger.log(Level.FINE, "Recuperando metadados de "+blob.getName()+"...");
 				try{
 					blob.downloadAttributes();
@@ -748,9 +746,17 @@ class AzureConnector {
 					if (se.getMessage().contains("The specified blob does not exist"))
 						continue;
 				}
-				Date blobResult = blob.getProperties().getLastModified();
 				
-				logger.log(Level.FINE, "Data de criação do blob "+blob.getName()+": "+blobResult);
+				Date blobResult;
+				if (blob.getMetadata()!=null && blob.getMetadata().containsKey("originalLastModified")){
+					blobResult = new Date(Long.valueOf(blob.getMetadata().get("originalLastModified")));
+					logger.log(Level.FINE, "Data de criação do blob (metadado originalLastModified) "+blob.getName()+": "+blobResult);
+				}
+				else{
+					blobResult = blob.getProperties().getLastModified();
+					logger.log(Level.FINE, "Data de criação do blob (nativo) "+blob.getName()+": "+blobResult);
+				}
+				
 				long time;
 				if (blobResult == null)
 					time = 0;
