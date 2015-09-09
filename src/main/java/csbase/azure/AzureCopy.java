@@ -220,7 +220,7 @@ public class AzureCopy implements ISGADataTransfer {
           throws IOException {
           File file = path.toFile();
           if (!file.isDirectory()) {
-            timestampsMap.put(splitPath(file.getAbsolutePath(),
+            timestampsMap.put(splitPath(file.getPath().replace(".."+File.separatorChar, ""),
               File.separatorChar), file.lastModified());
           }
 
@@ -256,7 +256,7 @@ public class AzureCopy implements ISGADataTransfer {
     catch (URISyntaxException | StorageException e) {
       throw new SGADataTransferException(e);
     }
-
+    
     System.out.println("* res: "+timestampsMap);
     
     return timestampsMap;

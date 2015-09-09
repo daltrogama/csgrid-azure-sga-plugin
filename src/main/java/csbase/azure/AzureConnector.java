@@ -1,10 +1,18 @@
 package csbase.azure;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
 import java.security.InvalidKeyException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -22,11 +30,14 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
+import javax.xml.datatype.Duration;
 import javax.xml.parsers.ParserConfigurationException;
 
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.builder.ReflectionToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
+import org.json.JSONObject;
+import org.json.JSONTokener;
 import org.xml.sax.SAXException;
 
 import com.microsoft.azure.storage.AccessCondition;
@@ -65,9 +76,15 @@ import com.microsoft.windowsazure.management.storage.models.StorageAccountGetRes
 import com.microsoft.windowsazure.services.servicebus.ServiceBusConfiguration;
 import com.microsoft.windowsazure.services.servicebus.ServiceBusContract;
 import com.microsoft.windowsazure.services.servicebus.ServiceBusService;
+import com.microsoft.windowsazure.services.servicebus.models.BrokeredMessage;
+import com.microsoft.windowsazure.services.servicebus.models.GetSubscriptionResult;
 import com.microsoft.windowsazure.services.servicebus.models.ListQueuesResult;
 import com.microsoft.windowsazure.services.servicebus.models.ListTopicsResult;
 import com.microsoft.windowsazure.services.servicebus.models.QueueInfo;
+import com.microsoft.windowsazure.services.servicebus.models.ReceiveMessageOptions;
+import com.microsoft.windowsazure.services.servicebus.models.ReceiveMode;
+import com.microsoft.windowsazure.services.servicebus.models.ReceiveSubscriptionMessageResult;
+import com.microsoft.windowsazure.services.servicebus.models.SubscriptionInfo;
 import com.microsoft.windowsazure.services.servicebus.models.TopicInfo;
 
 class AzureConnector {
@@ -103,6 +120,7 @@ class AzureConnector {
 	private String projectsStorageContainer = "csgridProjects";
 	private String commandQueuePath = "commands";
 	private String statusTopicPath = "status";
+	private String statusSubscriptionName = "SGAStatusSubscription";
 	
 	// Define the connection-string with your values
 	private String storageConnectionString;
@@ -112,7 +130,7 @@ class AzureConnector {
 	private CloudBlobContainer algorithmsConteiner;
 	private CloudBlobContainer projectsConteiner;
 	
-	private String fakeBlobRootDir = "/AzureBlobStorage";
+	private String fakeBlobRootDir = "/AzureBlobStorage/";
 	
 	private Map<String, VMInstance> virtualMachines = Collections.synchronizedMap(new HashMap<String, VMInstance>());
 
@@ -204,6 +222,13 @@ class AzureConnector {
 			} catch (ServiceException e) {
 				throw new IllegalStateException("Falha ao criar tópico de status " + statusTopicPath + " no ServiceBus Azure", e);
 			}
+		}
+		
+		try {
+			SubscriptionInfo subscriptionInfo = new SubscriptionInfo(statusSubscriptionName);
+			serviceBusService.createSubscription(statusTopicPath, subscriptionInfo);
+		} catch (ServiceException e) {
+			logger.log(Level.WARNING, "Problema ao criar assinatura do tópico de status", e);
 		}
 
 	}
@@ -442,11 +467,8 @@ class AzureConnector {
         //required
         configurationSet.setAdminUserName(adminUserName);
         configurationSet.setUserName("u"+adminUserName);
-
         // TODO: Mesma senha.
         configurationSet.setUserPassword(adminUserPassword);
-        
-        
         //"Custom data" fica em /var/lib/waagent/ovf-env.xml
         //ou em                 /var/lib/waagent/CustomData
         //(codificado em base64)
@@ -518,7 +540,8 @@ class AzureConnector {
     private String getOSSourceImage() {
     	// Sistema operacional:
     	// TODO: Usar imagem própria
-    	return "b39f27a8b8c64d52b05eac6a62ebad85__Ubuntu-12_04_2-LTS-amd64-server-20130225-en-us-30GB";
+    	//return "b39f27a8b8c64d52b05eac6a62ebad85__Ubuntu-12_04_2-LTS-amd64-server-20130225-en-us-30GB";
+    	return "csgrid-sga-default-os-2015-09-04";
     	
 //        String sourceImageName = null;
 //        VirtualMachineOSImageListResponse virtualMachineImageListResponse = vmService.getVirtualMachineOSImagesOperations().list();
@@ -535,6 +558,17 @@ class AzureConnector {
     }
 	
 	private AtomicBoolean refreshAllVMsLock = new AtomicBoolean(false);
+	
+	public long getCommandQueueSize(){
+		for (int retry=0; retry<10; retry+=1){
+			try{
+				return this.serviceBusService.getQueue(commandQueuePath).getValue().getMessageCount();
+			} catch(Throwable e){
+				logger.log(Level.WARNING, "Não pude ler o número de mensagens que estão na fila de execução (retentativa "+retry+")", e);
+			}
+		}
+		return 0; // Não consegui ler, retorno zero.
+	}
 	
 	public void refreshAllVMs() throws InterruptedException{
 		
@@ -562,6 +596,7 @@ class AzureConnector {
 					ArrayList<HostedServiceListResponse.HostedService> hostedServicelist = hostedServiceListResponse.getHostedServices();
 					
 					for (HostedServiceListResponse.HostedService hostedService : hostedServicelist) {
+						
 						if (hostedService.getServiceName().startsWith("csgrid-sga")) {
 							
 							String name = hostedService.getServiceName();
@@ -570,52 +605,54 @@ class AzureConnector {
 							
 							VMInstance vmInstance = virtualMachines.get(name);
 							
-							if (vmInstance == null){
+							//if (vmInstance == null){
 			
-								logger.finest("Requisitando detalhes sobre o serviço de nuvem "+hostedService.getServiceName());
-								HostedServiceGetDetailedResponse hostedServiceGetDetailedResponse 
-									= vmService.getHostedServicesOperations().getDetailed(hostedService.getServiceName());
-			
-								ArrayList<HostedServiceGetDetailedResponse.Deployment> deploymentlist = hostedServiceGetDetailedResponse.getDeployments();
-								
-								int thisHostedServiceVMCount = 0;
-			
-								for (HostedServiceGetDetailedResponse.Deployment deployment : deploymentlist) {
-									ArrayList<Role> rolelist = deployment.getRoles();
-			
-									for (Role role : rolelist) {
-										if ((role.getRoleType()!=null) && (role.getRoleType().equalsIgnoreCase(VirtualMachineRoleType.PersistentVMRole.toString()))) {
-											virtualMachines.put(name, new VMInstance(name, name, role.getRoleSize()));
-											thisHostedServiceVMCount += 1;
-										}
+							logger.finest("Requisitando detalhes sobre o serviço de nuvem "+hostedService.getServiceName());
+							HostedServiceGetDetailedResponse hostedServiceGetDetailedResponse 
+								= vmService.getHostedServicesOperations().getDetailed(hostedService.getServiceName());
+		
+							ArrayList<HostedServiceGetDetailedResponse.Deployment> deploymentlist = hostedServiceGetDetailedResponse.getDeployments();
+							
+							int thisHostedServiceVMCount = 0;
+		
+							for (HostedServiceGetDetailedResponse.Deployment deployment : deploymentlist) {
+								ArrayList<Role> rolelist = deployment.getRoles();
+		
+								for (Role role : rolelist) {
+									if ((role.getRoleType()!=null) && (role.getRoleType().equalsIgnoreCase(VirtualMachineRoleType.PersistentVMRole.toString()))) {
+										virtualMachines.put(name, new VMInstance(name, name, role.getRoleSize()));
+										thisHostedServiceVMCount += 1;
 									}
 								}
-								
-								// Se o serviço de nuvem estiver "vazio", termina de o excluir de uma vez por todas!
-								if (thisHostedServiceVMCount == 0){
-									discovered.remove(name);
-									// Tenta uma só vez e, se der algo errado, ignora e segue em frente.
-									// (em uma próxima iteração poderá ser tentado novamente)
-									try{
-										logger.log(Level.INFO, "O serviço de nuvem "+name+" será excluído pro não possuir nenhuma máquina virtual.");
-										vmService.getHostedServicesOperations().deleteAll(name);
-									}catch(Throwable e){
-										logger.log(Level.FINE, "Erro ao excluir serviço de nuvem vazio "+name+" para limpeza."
-												+ " Será retentado novamente no futuro, se necessário.", e);
-									}
-								}
-								
 							}
+							
+							// Se o serviço de nuvem estiver "vazio", termina de o excluir de uma vez por todas!
+							if (thisHostedServiceVMCount == 0){
+								discovered.remove(name);
+								// Tenta uma só vez e, se der algo errado, ignora e segue em frente.
+								// (em uma próxima iteração poderá ser tentado novamente)
+								try{
+									logger.log(Level.INFO, "O serviço de nuvem "+name+" será excluído pro não possuir nenhuma máquina virtual.");
+									vmService.getHostedServicesOperations().deleteAll(name);
+								}catch(Throwable e){
+									logger.log(Level.FINE, "Erro ao excluir serviço de nuvem vazio "+name+" para limpeza."
+											+ " Será retentado novamente no futuro, se necessário.", e);
+								}
+							}
+								
 						}
 					}
 					
-					for (String listedVM : virtualMachines.keySet()){
+					for (String listedVM : new ArrayList<String>(virtualMachines.keySet())){
 						if (!discovered.contains(listedVM))
 							virtualMachines.remove(listedVM);
 					}
 					
 					if (retry > 0)
 						logger.info("A atualização das máquinas virtuais virtuais foi bem sucedida.");
+					
+					// TODO: Instrumentação de teste
+					writeTesterLog(virtualMachines.size());
 					
 					return; // Ok.
 				} catch (IOException | ServiceException | ParserConfigurationException
@@ -632,6 +669,21 @@ class AzureConnector {
 		}
 	}
 
+	public static final void writeTesterLog(int numOfVMs){
+		//TODO: Código para instrumentação de testes hard-coded.
+		File vmCountLog = new File("/Users/daltrogama/Documents/workspace.csbase/csgrid-trunk/_project/admin/tester/vmCount.log");
+		DateFormat fmt = new SimpleDateFormat("dd/MM/yyyy hh:mm:ss,SSS");
+		
+		try(FileOutputStream out = new FileOutputStream(vmCountLog, true)){
+			try(PrintWriter w = new PrintWriter(out)){
+				w.println(fmt.format(new Date())+"\t"+numOfVMs);
+			}
+		} catch (IOException e) {
+			e.printStackTrace(System.err);
+		}
+		
+	}
+	
 	public Map<String, VMInstance> getAllVMs() {
 		return Collections.unmodifiableMap(virtualMachines);
 	}
@@ -645,6 +697,12 @@ class AzureConnector {
 			if (!source.toFile().getParentFile().exists())
 				source.toFile().getParentFile().mkdirs();
 			
+			long existingTimestamp = getTimestamp(targetBlob);
+			if (existingTimestamp==source.toFile().lastModified()){
+				logger.log(Level.FINE, "Não copiando arquivo "+source+" para BLOB "+targetBlob.getName()+" porque o arquivo já existe e possui o mesmo timestamp.");
+				return;
+			}
+			
 			targetBlob.uploadFromFile(source.toFile().getAbsolutePath());
 			HashMap<String, String> metadata = new HashMap<>();
 			metadata.put("originalLastModified", String.valueOf(source.toFile().lastModified()));
@@ -656,6 +714,13 @@ class AzureConnector {
 			logger.log(Level.FINE, "Copiando BLOB "+sourceBlob.getName()+" para arquivo "+target);
 			if (!target.toFile().getParentFile().exists())
 				target.toFile().getParentFile().mkdirs();
+			
+			if (target.toFile().exists()){
+				long existingTimestamp = getTimestamp(sourceBlob);
+				if (target.toFile().lastModified() == existingTimestamp)
+					logger.log(Level.FINE, "Não copiando BLOB "+sourceBlob.getName()+" para arquivo "+target+" porque o arquivo já existe e possui o mesmo timestamp.");
+			}
+			
 			sourceBlob.downloadToFile(target.toFile().getAbsolutePath());
 		}
 //		else if (!sourceIsAzure && !targetIsAzure){
@@ -730,7 +795,7 @@ class AzureConnector {
 		logger.log(Level.FINE, "Verificando se o arquivo "+target+" existe: "+result);
 		return result;
 	}
-
+	
 	public Map<String[], Long> getTimestamps(Path rootDir) throws URISyntaxException, StorageException {
 		
 		Map<String[], Long> result = new HashMap<>();
@@ -738,37 +803,43 @@ class AzureConnector {
 		for (ListBlobItem i : unAzurePrefixTree(rootDir.toFile().getAbsolutePath())){
 			if (i instanceof CloudBlockBlob){
 				CloudBlockBlob blob = (CloudBlockBlob)i;
-				logger.log(Level.FINE, "Recuperando metadados de "+blob.getName()+"...");
-				try{
-					blob.downloadAttributes();
-				}
-				catch(StorageException se){
-					if (se.getMessage().contains("The specified blob does not exist"))
-						continue;
-				}
-				
-				Date blobResult;
-				if (blob.getMetadata()!=null && blob.getMetadata().containsKey("originalLastModified")){
-					blobResult = new Date(Long.valueOf(blob.getMetadata().get("originalLastModified")));
-					logger.log(Level.FINE, "Data de criação do blob (metadado originalLastModified) "+blob.getName()+": "+blobResult);
-				}
-				else{
-					blobResult = blob.getProperties().getLastModified();
-					logger.log(Level.FINE, "Data de criação do blob (nativo) "+blob.getName()+": "+blobResult);
-				}
-				
-				long time;
-				if (blobResult == null)
-					time = 0;
-				else
-					time = blobResult.getTime();
-				result.put(splitPath(fakeBlobRootDir+"/"+blob.getName(), '/'), time);
+				result.put(splitPath(blob.getName(), '/'), getTimestamp(blob));
 			}
 		}
 
 		return result;
 	}
 
+	private long getTimestamp(CloudBlockBlob blob) throws URISyntaxException{
+		
+		logger.log(Level.FINE, "Recuperando metadados de "+blob.getName()+"...");
+		try{
+			blob.downloadAttributes();
+		}
+		catch(StorageException se){
+			if (se.getMessage().contains("The specified blob does not exist"))
+				return 0;
+		}
+		
+		Date blobResult;
+		if (blob.getMetadata()!=null && blob.getMetadata().containsKey("originalLastModified")){
+			blobResult = new Date(Long.valueOf(blob.getMetadata().get("originalLastModified")));
+			logger.log(Level.FINE, "Data de criação do blob (metadado originalLastModified) "+blob.getName()+": "+blobResult);
+		}
+		else{
+			blobResult = blob.getProperties().getLastModified();
+			logger.log(Level.FINE, "Data de criação do blob (nativo) "+blob.getName()+": "+blobResult);
+		}
+		
+		long time;
+		if (blobResult == null)
+			time = 0;
+		else
+			time = blobResult.getTime();
+		
+		return time;
+	}
+	
 	
 	  /**
 	   * Separa um caminho.
@@ -797,5 +868,38 @@ class AzureConnector {
 	    }
 	    return pathAsList.toArray(new String[pathAsList.size()]);
 	  }
+
+	public JSONObject receiveStatus() throws ServiceException, IOException {
+		ReceiveMessageOptions options = new ReceiveMessageOptions();
+		options.setReceiveMode(ReceiveMode.RECEIVE_AND_DELETE);
+		options.setTimeout(60000);
+		try{
+			ReceiveSubscriptionMessageResult res = serviceBusService.receiveSubscriptionMessage(statusTopicPath, statusSubscriptionName, options);
+			if (res == null || res.getValue() == null)
+				return null;
+			return new JSONObject(new JSONTokener(res.getValue().getBody()));
+		}
+		catch(com.microsoft.windowsazure.core.ServiceTimeoutException te){
+			return null;
+		}
+	}
+
+	public void sendNewCommand(String jsonCommandDescription) {
+		
+		BrokeredMessage msg = new BrokeredMessage(jsonCommandDescription);
+		Throwable error = null;
+		for (int retry=0; retry<10; retry+=1){
+			try {
+				this.serviceBusService.sendQueueMessage(commandQueuePath, msg);
+				return;
+			} catch (Throwable e) {
+				logger.log(Level.SEVERE, "Falha ao enviar comando para nuvem (retentativa "+retry+"): "+jsonCommandDescription, e);
+				error = e;
+			}
+		}
+		if (error != null)
+			throw new IllegalStateException("Falha ao enviar comando para nuvem: "+jsonCommandDescription, error);
+		
+	}
 
 }

@@ -60,6 +60,8 @@ public class SGAAzure implements ISGADaemon {
 	private Timer renewPropertiesTimer;
 
 	private Timer renewTimer;
+	
+	private final AzureVMMaintanceThread azureVMMaintanceThread = new AzureVMMaintanceThread(azure);
 
 	public SGAAzure(IServiceManager serviceManager) {
 		this.sgaService = ISGAService.class.cast(serviceManager.getService(SGA_SERVICE_NAME));
@@ -112,7 +114,6 @@ public class SGAAzure implements ISGADaemon {
 		return sgaProperties;
 	}
 
-
 	@Override
 	public boolean start() throws SGADaemonException {
 		if (this.sgaService == null) {
@@ -122,10 +123,11 @@ public class SGAAzure implements ISGADaemon {
 		//validatePluginProperties();
 		
 		azure.configure(pluginProperties);
-		
-		executor = new ExecutionPool(pluginProperties, azure);
-		
+
 		sgaName = pluginProperties.getProperty(sgaidl.SGA_NAME.value);
+		
+		executor = new ExecutionPool(pluginProperties, azure, this.sgaService, sgaName);
+		
 		String logFile = "";
 		try {
 			if (pluginProperties.getProperty(PROP_LOG_PATH) != null) {
@@ -165,7 +167,6 @@ public class SGAAzure implements ISGADaemon {
 		int updateTime =
 				Integer.parseInt(pluginProperties.getProperty(PROP_MACHINE_TIME));
 
-
 		renewPropertiesTimer = new Timer();
 		renewPropertiesTimer.schedule(new SGAUpdatePropertiesTask(), updateTime * 1000, updateTime * 1000);
 
@@ -173,6 +174,8 @@ public class SGAAzure implements ISGADaemon {
 
 
 		initTestDemo();
+		
+		azureVMMaintanceThread.start();
 
 
 		return true;
@@ -185,6 +188,16 @@ public class SGAAzure implements ISGADaemon {
 	@Override
 	public void stop() {
 
+		while (azureVMMaintanceThread.isAlive()){
+			azureVMMaintanceThread.interrupt();
+			try {
+				azureVMMaintanceThread.join(1000);
+			} catch (InterruptedException e) {
+				logger.log(Level.INFO, "Thread interrompida.", e);
+				break;
+			}
+		}
+		
 		if (renewTimer != null) {
 			renewTimer.cancel();
 		}
@@ -193,7 +206,7 @@ public class SGAAzure implements ISGADaemon {
 			renewPropertiesTimer.cancel();
 		}
 
-		logger.info("Finaliza o plugin do SGA.");
+		logger.info("SGA Azure finalizado.");
 	}
 
 	/**
@@ -385,7 +398,10 @@ public class SGAAzure implements ISGADaemon {
 
 	@Override
 	public SGACommand executeCommand(String command, String cmdid, Pair[] extraParams) throws SystemException, MissingParameterException {
-		return executor.executeCommand(command, cmdid, Utils.convertDicToMap(extraParams));
+		System.out.println("SGAAzure.executeCommand(command="+command+", cmdid="+cmdid+", params="+Utils.convertDicToMap(extraParams)+")");
+		SGACommand res = executor.executeCommand(command, cmdid, Utils.convertDicToMap(extraParams));
+		azureVMMaintanceThread.demandRun();
+		return res;
 	}
 
 	@Override
